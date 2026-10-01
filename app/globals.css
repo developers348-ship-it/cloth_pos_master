@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  /* This UI is light-only (white cards, text-gray-* throughout). Pin the
+     color-scheme so the OS dark setting can't restyle native controls or
+     autofill, and so inherited text stays dark on white. */
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ── Jameel Noori Nastaleeq Kasheeda (Urdu receipt font) ───────────────────── */
+/* Download from https://urdufonts.net/fonts/jameel-noori-nastaleeq-kasheeda   */
+/* and place the TTF file at public/fonts/JameelNooriNastaleeqKasheeda.ttf     */
+@font-face {
+  font-family: "JameelNoori";
+  src: url("/fonts/JameelNooriNastaleeqKasheeda.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Hide scrollbars on scrollable panels while keeping scroll functional ── */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, new Edge */
+}
+
+.urdu-text {
+  font-family: "JameelNoori", "Noto Nastaliq Urdu", serif;
+  direction: rtl;
+  text-align: right;
+  line-height: 2.2;
+  letter-spacing: 0;
+  font-size: 1.2em;
+}
+
+/* ── Urdu UI mode — applied to <html> by the i18n context ────────────────── */
+html.urdu-ui body {
+  font-family: "JameelNoori", "Noto Nastaliq Urdu", serif;
+}
+
+html.urdu-ui h1,
+html.urdu-ui h2,
+html.urdu-ui h3,
+html.urdu-ui p,
+html.urdu-ui span,
+html.urdu-ui a,
+html.urdu-ui button,
+html.urdu-ui label {
+  font-family: "JameelNoori", "Noto Nastaliq Urdu", serif;
+  line-height: 2;
+  font-size: 1.15em;
+}
+
+

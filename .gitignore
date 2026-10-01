@@ -1,0 +1,65 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+/coverage
+
+# ─── Next.js ──────────────────────────────────────────────────────────────────
+/.next/
+/out/
+
+# ─── Production ───────────────────────────────────────────────────────────────
+/build
+
+# ─── Prisma ───────────────────────────────────────────────────────────────────
+# Keep migrations and schema, ignore generated client
+/prisma/generated/
+
+# ─── Environment files ────────────────────────────────────────────────────────
+# Do NOT commit secrets — use .env.example as template
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# ─── Debug logs ───────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+.DS_Store
+*.pem
+Thumbs.db
+
+# ─── TypeScript ───────────────────────────────────────────────────────────────
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── Vercel ───────────────────────────────────────────────────────────────────
+.vercel
+
+# ─── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── SQL dump files ───────────────────────────────────────────────────────────
+*.sql.bak
+
+# ─── Clear Data tool backups (whole-DB JSON dumps — never committed) ─────────
+/data/test-data-backups/

@@ -1,0 +1,913 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  CASHIER
+  ACCOUNTANT
+}
+
+enum PartyType {
+  CASH
+  CREDIT
+  VENDOR
+}
+
+// Optional fabric kind on an item. It sets how long a "suit" is, which the
+// sales screen's Suit button enters as the quantity — see lib/units.ts
+// `SUIT_METRES`.
+enum ClothType {
+  COTTON
+  WASH_WEAR
+}
+
+enum Unit {
+  PCS
+  GAZ
+  MTR
+  // A purchase-side counting unit only. `Item.unit` is never BUNDLE and stock
+  // is never held in it — a bundle is expanded into pieces at the GRN. See
+  // lib/units.ts.
+  BUNDLE
+}
+
+enum InvoiceStatus {
+  SAVED
+  HELD
+  VOIDED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  CONFLICT
+}
+
+enum GRNType {
+  PURCHASE
+  RETURN
+}
+
+enum LedgerEntryType {
+  SALE
+  SALE_RETURN
+  PURCHASE
+  PURCHASE_RETURN
+  PAYMENT
+  RECEIPT
+  ADJUSTMENT
+  OPENING_BALANCE
+}
+
+enum StockAdjustmentType {
+  ADD
+  SUBTRACT
+}
+
+enum AccountType {
+  CASH
+  BANK
+  // Money taken on the card machine but not yet deposited by the processor.
+  // Settled into a BANK account by a TRANSFER pair when the payout lands.
+  CARD
+}
+
+enum AccountEntryType {
+  SALE_RECEIPT
+  SALE_REFUND
+  PURCHASE_PAYMENT
+  PURCHASE_REFUND
+  RECOVERY
+  PAYMENT
+  INSTALLMENT_COLLECTION
+  ADJUSTMENT
+  // Money moved between two of the store's own accounts (card machine -> bank).
+  TRANSFER
+  // An operating cost paid out of this account (salary, rent, utilities...).
+  EXPENSE
+  // The owner taking earnings out of the business. Money leaves the account
+  // exactly like an expense does, but it is NOT a cost of running the shop and
+  // so must never reduce reported profit.
+  PROFIT_WITHDRAWAL
+  // The owner putting money back in -- the mirror of PROFIT_WITHDRAWAL.
+  CAPITAL_INJECTION
+}
+
+// What kind of money-out row an Expense is. One table with a kind flag rather
+// than two, because the page, the account posting and the filters are otherwise
+// identical -- only the profit maths differs.
+enum ExpenseKind {
+  EXPENSE
+  PROFIT_WITHDRAWAL
+  CAPITAL_INJECTION
+}
+
+enum ExpenseStatus {
+  // Money has left an account; there is an AccountEntry behind it.
+  PAID
+  // Recorded as owed (salary due, rent not yet paid) -- no account posting.
+  UNPAID
+}
+
+enum InstallmentPlanKind {
+  PROMISE_DAY
+  WEEKLY
+  MONTHLY
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+// ─── ORGANIZATION & BRANCHES ──────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  branches  Branch[]
+}
+
+model Branch {
+  id                      String       @id @default(cuid())
+  name                    String
+  address                 String?
+  city                    String?
+  phone                   String?
+  mobile                  String?
+  email                   String?
+  website                 String?
+  logoUrl                 String?
+  footerTerms             String?      @default("* ALL PRICES ARE FIXED\n* NO CLAIM ON STICH SUIT\n* SUIT EXCHANGED WITHIN SAME BRANDS ONLY\n* BRING INVOICE FOR EXCHANGE/CLAIM/RETURN WITHIN 7 DAYS")
+  // Base font size (px) of the 80mm thermal slip. Everything else on the
+  // receipt is derived from it - see lib/receipt-font.ts. Thermal printers
+  // vary in how large a given px comes out, so this is a setting.
+  receiptFontSize         Int          @default(12)
+  // Site-wide feature toggles (admin-controlled, apply to every device/user)
+  pwaOfflineEnabled       Boolean      @default(true)
+  languageSwitcherEnabled Boolean      @default(true)
+  orgId                   String
+  organization            Organization @relation(fields: [orgId], references: [id])
+  isActive                Boolean      @default(true)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  users             UserBranch[]
+  invoices          SaleInvoice[]
+  grns              GRN[]
+  stockLevels       ItemStock[]
+  ledgerEntries     LedgerEntry[]
+  dayBooks          DayBook[]
+  stockAdjustments  StockAdjustment[]
+  accounts          Account[]
+  accountEntries    AccountEntry[]
+  installmentPlans  InstallmentPlan[]
+  expenses          Expense[]
+  expenseCategories ExpenseCategory[]
+
+  @@index([orgId])
+}
+
+// ─── USERS ────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CASHIER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  branches         UserBranch[]
+  invoices         SaleInvoice[]
+  grns             GRN[]
+  auditLogs        AuditLog[]
+  sessions         Session[]
+  // A cost can name a staff member as its payee (a salary), and every cost
+  // records who entered it -- two separate relations to the same table, so
+  // both need an explicit name.
+  expensesAsPayee  Expense[]     @relation("ExpensePayee")
+  expensesRecorded Expense[]     @relation("ExpenseRecordedBy")
+}
+
+model UserBranch {
+  id        String   @id @default(cuid())
+  userId    String
+  branchId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, branchId])
+  @@index([userId])
+  @@index([branchId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── PARTIES (Customers / Vendors) ────────────────────────────────────────────
+
+model Party {
+  id              String    @id @default(cuid())
+  accountId       Int       @unique @default(autoincrement())
+  name            String
+  address         String?
+  city            String?
+  phone           String?
+  mobile          String?
+  type            PartyType @default(CASH)
+  previousBalance Decimal   @default(0) @db.Decimal(12, 2)
+  creditLimit     Decimal   @default(0) @db.Decimal(12, 2)
+  promiseDays     Int?
+  // Free-text remarks kept by staff about this customer/vendor (delivery
+  // quirks, who to ask for, an agreed arrangement). Nullable: every party
+  // that already exists has none, and most never will.
+  notes           String?
+  isDefault       Boolean   @default(false) // Walking Customer
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  invoices         SaleInvoice[]
+  grns             GRN[]
+  ledgerEntries    LedgerEntry[]
+  recoveries       Recovery[]
+  payments         Payment[]
+  accountEntries   AccountEntry[]
+  installmentPlans InstallmentPlan[]
+
+  @@index([type])
+  @@index([name])
+}
+
+// ─── CATALOG LOOKUPS ──────────────────────────────────────────────────────────
+
+model ItemCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  items     Item[]
+}
+
+model ItemBrand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  items     Item[]
+}
+
+model ItemGroup {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  items     Item[]
+}
+
+// ─── ITEMS (Products) ─────────────────────────────────────────────────────────
+
+model Item {
+  id           String        @id @default(cuid())
+  name         String
+  description  String?
+  // Legacy free-text fields (kept for backward compat)
+  group        String?
+  category     String?
+  brand        String?
+  // FK relations to catalog lookups (new)
+  categoryId   String?
+  brandId      String?
+  groupId      String?
+  itemCategory ItemCategory? @relation(fields: [categoryId], references: [id])
+  itemBrand    ItemBrand?    @relation(fields: [brandId], references: [id])
+  itemGroup    ItemGroup?    @relation(fields: [groupId], references: [id])
+
+  // The unit the item is SOLD in, and the unit `ItemStock.qty` is measured in.
+  // Goods bought in another unit are converted once, at the GRN — see
+  // lib/units.ts for why the conversion lives there and nowhere else.
+  unit            Unit     @default(PCS)
+  // What the item is normally bought in. Informational: it pre-selects the
+  // GRN's buy-unit dropdown and drives the "GAZ: 24" line under a stock
+  // figure. Nothing calculates from it.
+  purchaseUnit    Unit?
+  // PCS items only. Null or 0 means the item is not sold in bundles.
+  piecesPerBundle Int?
+  // Optional. Drives the Suit button at the till; null means no button.
+  clothType       ClothType?
+  // Per `unit` (the sell unit), restated by the GRN whenever goods arrive in a
+  // different unit — so cost and quantity are always in step.
+  purchasePrice   Decimal  @default(0) @db.Decimal(12, 2)
+  salePrice       Decimal  @default(0) @db.Decimal(12, 2)
+  altSalePrice    Decimal? @db.Decimal(12, 2)
+  discountRS      Decimal  @default(0) @db.Decimal(12, 2)
+  discountPct     Decimal  @default(0) @db.Decimal(5, 2)
+  openingStock    Decimal  @default(0) @db.Decimal(12, 3)
+  minLevel        Decimal  @default(0) @db.Decimal(12, 3)
+  // The optional company barcode printed on the goods by the manufacturer.
+  barcode         String?
+  // The shop's own numeric code, assigned by the database on insert and never
+  // written by the app (see migration 20260929000000_item_system_barcode).
+  systemBarcode   String   @unique @default(dbgenerated("next_item_system_barcode()"))
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stockLevels      ItemStock[]
+  invoiceItems     SaleInvoiceItem[]
+  grnItems         GRNItem[]
+  stockAdjustments StockAdjustment[]
+
+  @@index([name])
+  @@index([barcode])
+  @@index([category])
+  @@index([brand])
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([groupId])
+}
+
+model ItemStock {
+  id        String   @id @default(cuid())
+  itemId    String
+  branchId  String
+  // In `Item.unit`. Four decimals rather than three: one metre of a
+  // gaz-stocked item is 1.1111 gaz, and at 3dp nine metres would leave a
+  // phantom 0.001 on hand and offer a metre of cloth that is not there.
+  qty       Decimal  @default(0) @db.Decimal(14, 4)
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+
+  @@unique([itemId, branchId])
+  @@index([itemId])
+  @@index([branchId])
+}
+
+// ─── SALES INVOICES ───────────────────────────────────────────────────────────
+
+model SaleInvoice {
+  id          String   @id @default(cuid())
+  invoiceNo   Int
+  branchId    String
+  partyId     String
+  userId      String
+  date        DateTime @default(now())
+  partyOption String   @default("CASH") // CASH|CC (legacy rows may still hold CR|1INCH|5INCH)
+  printUrdu   Boolean  @default(false)
+  promiseDays Int?
+
+  // Payment method (how money was collected)
+  paymentMethod      String  @default("CASH") // CASH|BANK|CASH_AND_BANK
+  bankAccountId      String?
+  bankAmount         Decimal @default(0) @db.Decimal(12, 2)
+  creditApplied      Decimal @default(0) @db.Decimal(12, 2)
+  repaymentType      String  @default("NONE") // NONE|PROMISE_DAY|WEEKLY|MONTHLY
+  installmentPeriods Int?
+
+  // Totals
+  grossSale       Decimal @default(0) @db.Decimal(12, 2)
+  packageDiscount Decimal @default(0) @db.Decimal(12, 2)
+  saleAmount      Decimal @default(0) @db.Decimal(12, 2)
+  returnAmount    Decimal @default(0) @db.Decimal(12, 2)
+  adjustment      Decimal @default(0) @db.Decimal(12, 2)
+  adjustType      String  @default("sub") // add|sub
+  slipAmount      Decimal @default(0) @db.Decimal(12, 2)
+  courierCharges  Decimal @default(0) @db.Decimal(12, 2)
+  netBill         Decimal @default(0) @db.Decimal(12, 2)
+  cardAmount      Decimal @default(0) @db.Decimal(12, 2)
+  cashReceived    Decimal @default(0) @db.Decimal(12, 2)
+  change          Decimal @default(0) @db.Decimal(12, 2)
+
+  // Unit totals
+  soldPcs      Decimal @default(0) @db.Decimal(12, 3)
+  soldGaz      Decimal @default(0) @db.Decimal(12, 3)
+  soldMtr      Decimal @default(0) @db.Decimal(12, 3)
+  returnPcs    Decimal @default(0) @db.Decimal(12, 3)
+  returnGaz    Decimal @default(0) @db.Decimal(12, 3)
+  returnMtr    Decimal @default(0) @db.Decimal(12, 3)
+  scannedCount Int     @default(0)
+  chooseBank   String?
+
+  status     InvoiceStatus @default(SAVED)
+  syncStatus SyncStatus    @default(PENDING)
+  localId    String? // offline reference
+  notes      String?
+
+  // Set on the net-return invoice that a full-order refund creates, pointing at
+  // the sale being refunded. A refund is a document of its own (the store's
+  // books have to show the goods coming back and the money going out on the day
+  // it happened), so this is the only thread tying the pair together — the sales
+  // list reads it in both directions to tag the original "Refunded" and the
+  // mirror "Refund of #N".
+  refundOfInvoiceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch          Branch            @relation(fields: [branchId], references: [id])
+  party           Party             @relation(fields: [partyId], references: [id])
+  user            User              @relation(fields: [userId], references: [id])
+  items           SaleInvoiceItem[]
+  ledgerEntries   LedgerEntry[]
+  bankAccount     Account?          @relation(fields: [bankAccountId], references: [id])
+  accountEntries  AccountEntry[]
+  recoveries      Recovery[]
+  installmentPlan InstallmentPlan?
+  refundOf        SaleInvoice?      @relation("InvoiceRefund", fields: [refundOfInvoiceId], references: [id])
+  refunds         SaleInvoice[]     @relation("InvoiceRefund")
+
+  @@unique([invoiceNo, branchId])
+  @@index([branchId])
+  @@index([partyId])
+  @@index([date])
+  @@index([status])
+  @@index([bankAccountId])
+  @@index([refundOfInvoiceId])
+}
+
+model SaleInvoiceItem {
+  id        String  @id @default(cuid())
+  invoiceId String
+  itemId    String
+  isReturn  Boolean @default(false)
+
+  qty    Decimal @db.Decimal(12, 3)
+  pcs    Decimal @default(0) @db.Decimal(12, 3)
+  gaz    Decimal @default(0) @db.Decimal(12, 3)
+  mtr    Decimal @default(0) @db.Decimal(12, 3)
+  rate   Decimal @db.Decimal(12, 2)
+  disRS  Decimal @default(0) @db.Decimal(12, 2)
+  disPct Decimal @default(0) @db.Decimal(5, 2)
+  amount Decimal @db.Decimal(12, 2)
+
+  invoice SaleInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item    Item        @relation(fields: [itemId], references: [id])
+
+  @@index([invoiceId])
+  @@index([itemId])
+}
+
+// ─── GRN (Goods Receipt Note / Purchases) ─────────────────────────────────────
+
+model GRN {
+  id       String   @id @default(cuid())
+  grnNo    Int
+  branchId String
+  partyId  String
+  userId   String
+  date     DateTime @default(now())
+  billNo   String?
+  remarks  String?
+
+  saleAmount       Decimal @default(0) @db.Decimal(12, 2)
+  billAmount       Decimal @default(0) @db.Decimal(12, 2)
+  returnAmount     Decimal @default(0) @db.Decimal(12, 2)
+  discountPct      Decimal @default(0) @db.Decimal(5, 2)
+  adjustment       Decimal @default(0) @db.Decimal(12, 2)
+  netBill          Decimal @default(0) @db.Decimal(12, 2)
+  totalPurchaseQty Decimal @default(0) @db.Decimal(12, 3)
+  totalReturnQty   Decimal @default(0) @db.Decimal(12, 3)
+
+  // Payment method (how the vendor was paid at receipt time)
+  paymentMethod      String  @default("LEND") // CASH|BANK|CASH_AND_BANK|LEND
+  cashAmount         Decimal @default(0) @db.Decimal(12, 2)
+  bankAmount         Decimal @default(0) @db.Decimal(12, 2)
+  bankAccountId      String?
+  promiseDays        Int?
+  installmentPeriods Int?
+  repaymentType      String  @default("NONE") // NONE|PROMISE_DAY|WEEKLY|MONTHLY
+
+  // A Purchase Return GRN: a document entered to send goods back, every line
+  // RET. A purchase GRN can still carry RET lines of its
+  // own; this flag is what the form reopens in and what the lists badge.
+  isReturn Boolean @default(false)
+
+  syncStatus SyncStatus @default(PENDING)
+  localId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch          Branch           @relation(fields: [branchId], references: [id])
+  party           Party            @relation(fields: [partyId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  items           GRNItem[]
+  ledgerEntries   LedgerEntry[]
+  bankAccount     Account?         @relation(fields: [bankAccountId], references: [id])
+  accountEntries  AccountEntry[]
+  installmentPlan InstallmentPlan?
+  payments        Payment[]
+
+  @@unique([grnNo, branchId])
+  @@index([branchId])
+  @@index([partyId])
+  @@index([date])
+  @@index([bankAccountId])
+}
+
+model GRNItem {
+  id     String  @id @default(cuid())
+  grnId  String
+  itemId String
+  type   GRNType @default(PURCHASE)
+
+  // `qty` and `costRate` are as the vendor billed them, in `buyUnit` — the
+  // GRN's money must match the bill in the vendor's own terms. `stockQty` is
+  // the same quantity converted into the item's sell unit, which is what
+  // actually moved stock. Stored rather than recomputed on read, so changing
+  // the gaz/metre settings later can never rewrite history.
+  qty      Decimal  @db.Decimal(12, 3)
+  buyUnit  Unit?
+  stockQty Decimal? @db.Decimal(14, 4)
+  costRate Decimal  @db.Decimal(12, 2)
+  saleRate Decimal  @db.Decimal(12, 2)
+  disPct   Decimal  @default(0) @db.Decimal(5, 2)
+  amount   Decimal  @db.Decimal(12, 2)
+
+  grn  GRN  @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  item Item @relation(fields: [itemId], references: [id])
+
+  @@index([grnId])
+  @@index([itemId])
+}
+
+// ─── LEDGER & ACCOUNTS ────────────────────────────────────────────────────────
+
+model LedgerEntry {
+  id         String          @id @default(cuid())
+  branchId   String
+  partyId    String
+  date       DateTime        @default(now())
+  type       LedgerEntryType
+  debit      Decimal         @default(0) @db.Decimal(12, 2)
+  credit     Decimal         @default(0) @db.Decimal(12, 2)
+  balance    Decimal         @default(0) @db.Decimal(12, 2)
+  reference  String? // Invoice no, GRN no, etc.
+  invoiceId  String?
+  grnId      String?
+  // Set when this row is the party-side leg of a Recovery/Payment settlement,
+  // so undoing that settlement can find its ledger row exactly rather than
+  // matching on the reference string.
+  recoveryId String?
+  paymentId  String?
+  notes      String?
+  createdAt  DateTime        @default(now())
+
+  branch   Branch       @relation(fields: [branchId], references: [id])
+  party    Party        @relation(fields: [partyId], references: [id])
+  invoice  SaleInvoice? @relation(fields: [invoiceId], references: [id])
+  grn      GRN?         @relation(fields: [grnId], references: [id])
+  recovery Recovery?    @relation(fields: [recoveryId], references: [id])
+  payment  Payment?     @relation(fields: [paymentId], references: [id])
+
+  @@index([branchId])
+  @@index([partyId])
+  @@index([date])
+  @@index([type])
+  @@index([recoveryId])
+  @@index([paymentId])
+}
+
+model Recovery {
+  id            String   @id @default(cuid())
+  branchId      String
+  partyId       String
+  date          DateTime @default(now())
+  amount        Decimal  @db.Decimal(12, 2)
+  paymentMethod String   @default("CASH") // CASH | BANK
+  bankName      String? // deprecated, superseded by accountId
+  accountId     String?
+  // Set when the money was collected against one specific sale invoice (the
+  // sales list's Mark Paid action, and installment collections on an invoice
+  // plan). A plain party-level recovery leaves it null.
+  invoiceId     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  party                  Party          @relation(fields: [partyId], references: [id])
+  account                Account?       @relation(fields: [accountId], references: [id])
+  invoice                SaleInvoice?   @relation(fields: [invoiceId], references: [id])
+  accountEntries         AccountEntry[]
+  ledgerEntries          LedgerEntry[]
+  installmentCollections Installment[]
+
+  @@index([branchId])
+  @@index([partyId])
+  @@index([accountId])
+  @@index([invoiceId])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  branchId      String
+  partyId       String
+  date          DateTime @default(now())
+  amount        Decimal  @db.Decimal(12, 2)
+  paymentMethod String   @default("CASH")
+  bankName      String? // deprecated, superseded by accountId
+  accountId     String?
+  // Set when the money was paid against one specific purchase bill — the
+  // vendor-side mirror of `Recovery.invoiceId`. Without it a vendor payment
+  // moved the vendor's balance but attached to no GRN, so every unplanned bill
+  // stayed UNPAID however much had been paid out (see lib/grn-settlement.ts).
+  // A payment made against the vendor's balance as a whole leaves it null.
+  grnId         String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  party                  Party          @relation(fields: [partyId], references: [id])
+  account                Account?       @relation(fields: [accountId], references: [id])
+  grn                    GRN?           @relation(fields: [grnId], references: [id])
+  accountEntries         AccountEntry[]
+  ledgerEntries          LedgerEntry[]
+  installmentCollections Installment[]
+
+  @@index([branchId])
+  @@index([partyId])
+  @@index([accountId])
+  @@index([grnId])
+}
+
+// ─── CASH / BANK ACCOUNTS ─────────────────────────────────────────────────────
+
+model Account {
+  id             String      @id @default(cuid())
+  branchId       String
+  type           AccountType
+  name           String
+  bankName       String?
+  accountNumber  String?
+  openingBalance Decimal     @default(0) @db.Decimal(12, 2)
+  isDefaultCash  Boolean     @default(false)
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  branch     Branch         @relation(fields: [branchId], references: [id])
+  entries    AccountEntry[]
+  invoices   SaleInvoice[]
+  grns       GRN[]
+  recoveries Recovery[]
+  payments   Payment[]
+  expenses   Expense[]
+
+  @@index([branchId])
+  @@index([type])
+}
+
+model AccountEntry {
+  id            String           @id @default(cuid())
+  branchId      String
+  accountId     String
+  date          DateTime         @default(now())
+  type          AccountEntryType
+  debit         Decimal          @default(0) @db.Decimal(12, 2) // money IN to this account
+  credit        Decimal          @default(0) @db.Decimal(12, 2) // money OUT of this account
+  reference     String?
+  partyId       String?
+  invoiceId     String?
+  grnId         String?
+  recoveryId    String?
+  paymentId     String?
+  installmentId String?
+  expenseId     String?
+  notes         String?
+  createdAt     DateTime         @default(now())
+
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  account     Account      @relation(fields: [accountId], references: [id])
+  party       Party?       @relation(fields: [partyId], references: [id])
+  invoice     SaleInvoice? @relation(fields: [invoiceId], references: [id])
+  grn         GRN?         @relation(fields: [grnId], references: [id])
+  recovery    Recovery?    @relation(fields: [recoveryId], references: [id])
+  payment     Payment?     @relation(fields: [paymentId], references: [id])
+  installment Installment? @relation(fields: [installmentId], references: [id])
+  expense     Expense?     @relation(fields: [expenseId], references: [id])
+
+  @@index([branchId])
+  @@index([accountId])
+  @@index([date])
+  @@index([type])
+  @@index([partyId])
+}
+
+// ─── COST MANAGEMENT (EXPENSES / OWNER DRAWINGS) ──────────────────────────────
+
+// A cost heading the shop can manage itself (Salary, Rent, Utilities...).
+// Deliberately a table rather than an enum: every shop has a different set and
+// adding one must not need a migration. Seeded lazily per branch by
+// `ensureExpenseCategories()` in lib/expenses.ts, the same find-or-create idiom
+// the house Cash/Card accounts use.
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  branchId  String
+  name      String
+  // Optional free-text grouping shown under the name on the page; not a
+  // second level of category, just a hint ("paid monthly", "per head").
+  note      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch   Branch    @relation(fields: [branchId], references: [id])
+  expenses Expense[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+}
+
+// One recorded cost, owner drawing or capital injection.
+//
+// `status` is what makes this more than a wrapper around AccountEntry: an
+// UNPAID row is a liability the shop has recognised but not settled (a salary
+// due, rent not yet paid), and carries no account posting at all. Paying it
+// later writes the AccountEntry and flips the status, so a cost is never
+// counted twice and an unpaid one never misstates a cash balance.
+model Expense {
+  id            String        @id @default(cuid())
+  branchId      String
+  date          DateTime      @default(now())
+  kind          ExpenseKind   @default(EXPENSE)
+  // Required for EXPENSE, always null for a withdrawal/injection: those are
+  // movements of the owner's capital, not a heading of running cost.
+  categoryId    String?
+  title         String
+  amount        Decimal       @db.Decimal(12, 2)
+  status        ExpenseStatus @default(PAID)
+  // CASH | BANK while PAID; null while UNPAID.
+  paymentMethod String?
+  accountId     String?
+  paidAt        DateTime?
+  // The payee can be a staff member with a login (payeeUserId) or anyone else
+  // by name (payeeName) -- a shop pays wages to people who never sign in.
+  // Selecting a user copies their name into payeeName so a statement still
+  // reads correctly if the user is later deleted.
+  payeeUserId   String?
+  payeeName     String?
+  reference     String?
+  notes         String?
+  // Who entered it. An audit trail on money leaving the till matters more here
+  // than anywhere else in the app.
+  recordedById  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  branch         Branch           @relation(fields: [branchId], references: [id])
+  category       ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  account        Account?         @relation(fields: [accountId], references: [id])
+  payeeUser      User?            @relation("ExpensePayee", fields: [payeeUserId], references: [id])
+  recordedBy     User?            @relation("ExpenseRecordedBy", fields: [recordedById], references: [id])
+  accountEntries AccountEntry[]
+
+  @@index([branchId])
+  @@index([date])
+  @@index([kind])
+  @@index([status])
+  @@index([categoryId])
+  @@index([accountId])
+}
+
+// ─── INSTALLMENT / LOAN PLANS ─────────────────────────────────────────────────
+
+model InstallmentPlan {
+  id        String              @id @default(cuid())
+  branchId  String
+  partyId   String
+  kind      InstallmentPlanKind
+  invoiceId String?             @unique
+  grnId     String?             @unique
+  principal Decimal             @db.Decimal(12, 2)
+  periods   Int
+  startDate DateTime            @default(now())
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  party        Party         @relation(fields: [partyId], references: [id])
+  invoice      SaleInvoice?  @relation(fields: [invoiceId], references: [id])
+  grn          GRN?          @relation(fields: [grnId], references: [id])
+  installments Installment[]
+
+  @@index([branchId])
+  @@index([partyId])
+}
+
+model Installment {
+  id         String            @id @default(cuid())
+  planId     String
+  seq        Int
+  dueDate    DateTime
+  amount     Decimal           @db.Decimal(12, 2)
+  paidAmount Decimal           @default(0) @db.Decimal(12, 2)
+  status     InstallmentStatus @default(PENDING)
+  paidAt     DateTime?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  plan           InstallmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  accountEntries AccountEntry[]
+  recovery       Recovery?       @relation(fields: [recoveryId], references: [id])
+  recoveryId     String?
+  payment        Payment?        @relation(fields: [paymentId], references: [id])
+  paymentId      String?
+
+  @@index([planId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model DayBook {
+  id          String   @id @default(cuid())
+  branchId    String
+  date        DateTime
+  cashIn      Decimal  @default(0) @db.Decimal(12, 2)
+  cashOut     Decimal  @default(0) @db.Decimal(12, 2)
+  creditSales Decimal  @default(0) @db.Decimal(12, 2)
+  openingCash Decimal  @default(0) @db.Decimal(12, 2)
+  closingCash Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, date])
+  @@index([branchId])
+}
+
+// ─── INVENTORY ────────────────────────────────────────────────────────────────
+
+model StockAdjustment {
+  id        String              @id @default(cuid())
+  branchId  String
+  itemId    String
+  type      StockAdjustmentType
+  qty       Decimal             @db.Decimal(12, 3)
+  reason    String?
+  createdAt DateTime            @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+  item   Item   @relation(fields: [itemId], references: [id])
+
+  @@index([branchId])
+  @@index([itemId])
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String // CREATE | UPDATE | DELETE | LOGIN | LOGOUT
+  entity    String // SaleInvoice | Item | Party | GRN | User ...
+  entityId  String?
+  oldValues Json?
+  newValues Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entity])
+  @@index([createdAt])
+}
+
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
