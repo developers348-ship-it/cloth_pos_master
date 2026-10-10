@@ -71,6 +71,25 @@ export function formatTime(date: Date | string | null | undefined): string {
   return toShopClock(d).toISOString().slice(11, 19);
 }
 
+/** `09 Oct 2026` on the shop's clock — unambiguous, for printed slips. */
+export function formatDateLong(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  const [yyyy, mm, dd] = shopDateKey(d).split("-");
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(mm) - 1];
+  return `${dd} ${mon} ${yyyy}`;
+}
+
+/** `hh:mm AM/PM` (12-hour) on the shop's clock — for printed slips. */
+export function formatTime12(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  const [h, m] = toShopClock(d).toISOString().slice(11, 16).split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
 export function generateLocalId(): string {
   return `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }

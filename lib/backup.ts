@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { BACKUP_SECRET_KEY, PRESERVED_SETTING_KEYS } from "@/lib/backup-schedule";
 
 /**
  * Whole-database backup and restore.
@@ -28,6 +29,9 @@ import { prisma } from "@/lib/prisma";
 
 /** Prisma's own bookkeeping table — restoring it would fight `migrate deploy`. */
 const EXCLUDED_TABLES = new Set(["_prisma_migrations"]);
+
+/** Truncated by a restore like the rest, but its backup-settings rows are put back — see restoreFromJson. */
+const PRESERVED_TABLES = new Set(["Setting"]);
 
 export const BACKUP_KIND = "cloth-pos-full-backup";
 export const BACKUP_VERSION = 2;
@@ -246,8 +250,11 @@ export async function readDatabase(): Promise<DatabaseDump> {
     // Ordered by primary key where there is one, so repeat dumps of an
     // unchanged database are byte-identical and easy to compare.
     const orderBy = meta.primaryKey.length > 0 ? ` ORDER BY ${meta.primaryKey.map(q).join(", ")}` : "";
+    // Credentials for backing up (Google Drive tokens) must never end up inside
+    // the very files that get uploaded and emailed around.
+    const where = name === "Setting" ? ` WHERE "key" <> '${BACKUP_SECRET_KEY}'` : "";
     const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-      `SELECT ${columns.map(q).join(", ")} FROM ${q(name)}${orderBy}`
+      `SELECT ${columns.map(q).join(", ")} FROM ${q(name)}${where}${orderBy}`
     );
     tables.push({
       table: name,
@@ -442,7 +449,7 @@ export type RestoreReport = {
   warnings: string[];
 };
 
-type ParsedBackup = { order?: unknown; tables?: unknown; meta?: { kind?: unknown; version?: unknown } };
+type ParsedBackup = { order?: unknown; tables?: unknown; meta?: { kind?: unknown; version?: unknown; exportedAt?: unknown } };
 
 /**
  * Replays a JSON backup over the live database inside one transaction: either
@@ -452,7 +459,8 @@ type ParsedBackup = { order?: unknown; tables?: unknown; meta?: { kind?: unknown
  * warning rather than failing the restore — a backup taken before a column was
  * dropped is still worth loading.
  */
-export async function restoreFromJson(parsed: unknown): Promise<RestoreReport> {
+/** Throws unless `parsed` is a full-database backup this app wrote. */
+function assertBackupShape(parsed: unknown): ParsedBackup & { tables: unknown[] } {
   const backup = (parsed ?? {}) as ParsedBackup;
   if (typeof backup !== "object" || !Array.isArray(backup.tables)) {
     throw new Error("Not a backup file: expected a JSON object with a `tables` array.");
@@ -462,6 +470,69 @@ export async function restoreFromJson(parsed: unknown): Promise<RestoreReport> {
       "This file was not produced by Backup → Export JSON. Only a full-database JSON backup can be restored."
     );
   }
+  return backup as ParsedBackup & { tables: unknown[] };
+}
+
+export type BackupInspection = {
+  exportedAt: string | null;
+  tables: number;
+  rows: number;
+  /** Tables that hold data here but are missing from the file — a restore would leave them empty. */
+  willEmpty: { table: string; rows: number }[];
+  /** Tables in the file this database does not have; they are skipped. */
+  unknownTables: string[];
+  /** Is the signed-in user in the file's User table? null when there is no User table in it. */
+  containsCurrentUser: boolean | null;
+};
+
+/**
+ * What a restore of this file would do, without doing it: how much it holds,
+ * which of today's tables it would wipe because the file predates them, and
+ * whether the person clicking Restore would still exist afterwards.
+ */
+export async function inspectBackup(parsed: unknown, currentUserId: string): Promise<BackupInspection> {
+  const backup = assertBackupShape(parsed);
+  const schema = await readSchema();
+
+  const inFile = new Map<string, Partial<TableDump>>();
+  for (const raw of backup.tables) {
+    const entry = raw as Partial<TableDump>;
+    if (entry && typeof entry.table === "string") inFile.set(entry.table, entry);
+  }
+
+  const willEmpty: { table: string; rows: number }[] = [];
+  for (const name of schema.order) {
+    if (inFile.has(name) || PRESERVED_TABLES.has(name)) continue;
+    const [{ count }] = await prisma.$queryRawUnsafe<{ count: bigint }[]>(
+      `SELECT COUNT(*)::bigint AS count FROM ${q(name)}`
+    );
+    if (Number(count) > 0) willEmpty.push({ table: name, rows: Number(count) });
+  }
+
+  let containsCurrentUser: boolean | null = null;
+  const users = inFile.get("User");
+  if (users && Array.isArray(users.columns) && Array.isArray(users.rows)) {
+    const idCol = users.columns.indexOf("id");
+    containsCurrentUser = idCol >= 0 ? (users.rows as unknown[][]).some((row) => row[idCol] === currentUserId) : null;
+  }
+
+  let rows = 0;
+  for (const entry of inFile.values()) if (Array.isArray(entry.rows)) rows += entry.rows.length;
+
+  return {
+    exportedAt: typeof (backup.meta as { exportedAt?: unknown })?.exportedAt === "string"
+      ? ((backup.meta as { exportedAt: string }).exportedAt)
+      : null,
+    tables: inFile.size,
+    rows,
+    willEmpty,
+    unknownTables: [...inFile.keys()].filter((name) => !schema.tables.has(name)),
+    containsCurrentUser,
+  };
+}
+
+export async function restoreFromJson(parsed: unknown): Promise<RestoreReport> {
+  const backup = assertBackupShape(parsed);
 
   const schema = await readSchema();
   const warnings: string[] = [];
@@ -531,10 +602,22 @@ export async function restoreFromJson(parsed: unknown): Promise<RestoreReport> {
     : null;
   const client = direct ?? prisma;
 
+  // The restore truncates `Setting` along with everything else. The backup
+  // schedule, its history and the Drive credentials describe *this machine*, not
+  // the shop's data, so they are read first and put back afterwards.
+  const preserved = await prisma.setting.findMany({ where: { key: { in: PRESERVED_SETTING_KEYS } } });
+
   try {
     await client.$transaction(
       async (tx) => {
         for (const statement of statements) await tx.$executeRawUnsafe(statement);
+        for (const row of preserved) {
+          await tx.setting.upsert({
+            where: { key: row.key },
+            create: { key: row.key, value: row.value },
+            update: { value: row.value },
+          });
+        }
       },
       // A shop's whole history is a lot of INSERTs; the 5 s default is not enough.
       { timeout: 300_000, maxWait: 30_000 }

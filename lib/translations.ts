@@ -14,6 +14,7 @@ import { partiesTranslations } from "./translations/parties";
 import { ledgerTranslations } from "./translations/ledger";
 import { reportsTranslations } from "./translations/reports";
 import { settingsTranslations } from "./translations/settings";
+import { backupTranslations } from "./translations/backup";
 import { rolesTranslations } from "./translations/roles";
 import { accountsTranslations } from "./translations/accounts";
 import { expensesTranslations } from "./translations/expenses";
@@ -292,6 +293,7 @@ export const translations = {
     ...ledgerTranslations.en,
     ...reportsTranslations.en,
     ...settingsTranslations.en,
+    ...backupTranslations.en,
     ...rolesTranslations.en,
     ...accountsTranslations.en,
     ...expensesTranslations.en,
@@ -306,6 +308,7 @@ export const translations = {
     ...ledgerTranslations.ur,
     ...reportsTranslations.ur,
     ...settingsTranslations.ur,
+    ...backupTranslations.ur,
     ...rolesTranslations.ur,
     ...accountsTranslations.ur,
     ...expensesTranslations.ur,

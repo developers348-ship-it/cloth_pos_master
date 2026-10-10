@@ -11,15 +11,16 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:supabase": "node scripts/migrate-supabase.mjs",
     "db:migrate:status": "node scripts/migrate-supabase.mjs --status",
-    "db:seed": "ts-node -P tsconfig.seed.json prisma/seed.ts",
+    "db:seed": "ts-node -P prisma/tsconfig.scripts.json prisma/seed.ts",
     "db:reset": "ts-node -P prisma/tsconfig.scripts.json -r tsconfig-paths/register prisma/reset-data.ts",
+    "backup:run": "ts-node -P prisma/tsconfig.scripts.json -r tsconfig-paths/register scripts/run-backup.ts",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "prisma": {
-    "seed": "ts-node -P tsconfig.seed.json prisma/seed.ts"
+    "seed": "ts-node -P prisma/tsconfig.scripts.json prisma/seed.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

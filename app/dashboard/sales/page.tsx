@@ -2076,10 +2076,11 @@ export default function SalesPage() {
 
       <style jsx global>{`
         @media print {
-          @page { margin: 4mm; }
+          @page { size: 80mm auto; margin: 3mm; }
+          body { font-family: "Courier New", monospace; }
           body * { visibility: hidden; }
           #receipt-print, #receipt-print * { visibility: visible; }
-          #receipt-print { position: absolute; top: 0; left: 0; width: 80mm; }
+          #receipt-print { position: absolute; top: 0; left: 0; width: 100%; }
         }
       `}</style>
     </div>

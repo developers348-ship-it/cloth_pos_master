@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useEffect, useRef } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useStore } from "@/lib/store-context";
 import { useI18n } from "@/lib/i18n";
@@ -18,6 +18,8 @@ import { invalidateUnitConfig } from "@/lib/use-unit-config";
 import type { Lang } from "@/lib/translations";
 import { canImpersonateRole } from "@/lib/impersonation";
 import type { TranslationKey } from "@/lib/translations";
+import BackupAutomation from "@/components/settings/BackupAutomation";
+import BackupRestore from "@/components/settings/BackupRestore";
 import BrandingUpload, { BRANDING_LABELS, type BrandingAsset } from "@/components/settings/BrandingUpload";
 import {
   clampReceiptFontSize, receiptFontScale,
@@ -85,8 +87,6 @@ type BackupFormat = (typeof BACKUP_FORMATS)[number]["id"];
 
 type BackupSummary = { tableCount: number; rowCount: number };
 
-type RestoreReport = { tablesRestored: number; rowsRestored: number; warnings: string[] };
-
 /** Typed into the confirmation box before a restore will run. Matches the API. */
 const RESTORE_PHRASE = "RESTORE";
 
@@ -148,6 +148,12 @@ export default function SettingsPage() {
 
   const [activeTab, setActiveTab] = useState<"store" | "receipt" | "pwa" | "backup" | "clearData" | "users" | "language" | "units">("store");
 
+  // Google sends the browser back to `?tab=backup&drive=…` after its consent
+  // screen; open the tab that was being worked on rather than the first one.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "backup") setActiveTab("backup");
+  }, []);
+
   // Gaz/metre lengths. Held as strings while being edited so a half-typed
   // "3" on the way to "36" doesn't momentarily become the live conversion.
   const [unitForm, setUnitForm] = useState({ inchesPerGaz: "36", inchesPerMtr: "40" });
@@ -184,11 +190,6 @@ export default function SettingsPage() {
   // Backup state
   const [exporting, setExporting] = useState<BackupFormat | null>(null);
   const [summary, setSummary] = useState<BackupSummary | null>(null);
-  const [restoreFile, setRestoreFile] = useState<File | null>(null);
-  const [restoreConfirm, setRestoreConfirm] = useState("");
-  const [restoring, setRestoring] = useState(false);
-  const [restoreReport, setRestoreReport] = useState<RestoreReport | null>(null);
-  const restoreFileRef = useRef<HTMLInputElement>(null);
 
   // Clear Data state
   const [clearDataEnabled, setClearDataEnabled] = useState(false);
@@ -714,49 +715,6 @@ export default function SettingsPage() {
     }
   }
 
-  // ── Restore ──
-
-  async function handleRestore() {
-    if (!restoreFile) { toast.error(t("settings_chooseBackupFileMsg")); return; }
-    if (restoreConfirm.trim().toUpperCase() !== RESTORE_PHRASE) {
-      toast.error(t("settings_typeRestoreMsg").replace("{phrase}", RESTORE_PHRASE));
-      return;
-    }
-    if (!confirm(t("settings_confirmRestore"))) return;
-
-    setRestoring(true);
-    setRestoreReport(null);
-    try {
-      const body = new FormData();
-      body.append("file", restoreFile);
-      body.append("confirm", RESTORE_PHRASE);
-      const res = await fetch("/api/settings/backup/restore", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error);
-
-      setRestoreReport(data);
-      setRestoreFile(null);
-      setRestoreConfirm("");
-      if (restoreFileRef.current) restoreFileRef.current.value = "";
-      toast.success(
-        t("settings_restoreDoneMsg")
-          .replace("{tables}", String(data.tablesRestored))
-          .replace("{rows}", Number(data.rowsRestored).toLocaleString()),
-        { duration: 6000 }
-      );
-      // Every table was replaced, including this branch's own settings row and
-      // the permission matrix, so the cached copies in this tab are now stale.
-      await refresh();
-      loadBackupSummary();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error && e.message ? e.message : t("settings_restoreFailedMsg"), {
-        duration: 8000,
-      });
-    } finally {
-      setRestoring(false);
-    }
-  }
-
   // ─── Unit conversion ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1237,7 +1195,9 @@ export default function SettingsPage() {
       {/* ── BACKUP TAB ─────────────────────────────────────────────────────── */}
       {activeTab === "backup" && (
         <div className="space-y-4">
-          {/* Export */}
+          <BackupAutomation />
+
+          {/* Manual Backup & Export section — disabled: "Automatic & Cloud Backup" covers manual backups.
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-5">
             <div className="flex items-start justify-between border-b pb-3 gap-4">
               <div>
@@ -1288,7 +1248,7 @@ export default function SettingsPage() {
               })}
             </div>
 
-            {/* Answers the question the three buttons raise: which one do I use? */}
+            Answers the question the three buttons raise: which one do I use?
             <div className={`bg-sky-50 border border-sky-200 rounded-xl p-4 text-sm text-sky-900 space-y-2 ${isUrdu ? "urdu-text" : ""}`}>
               <strong className="block">{t("settings_whichFormatTitle")}</strong>
               <p className="leading-relaxed">{t("settings_whichFormatBody")}</p>
@@ -1298,96 +1258,17 @@ export default function SettingsPage() {
               <strong>💡 {t("settings_tipLabel")}</strong> {t("settings_tipText")}
             </div>
           </div>
+          */}
 
-          {/* Restore */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-            <div className="border-b pb-3">
-              <h2 className={`font-semibold text-gray-700 flex items-center gap-2 ${isUrdu ? "urdu-text" : ""}`}>
-                <Upload className="w-4 h-4 text-gray-500" /> {t("settings_restoreImport")}
-              </h2>
-              <p className={`text-sm text-gray-500 mt-1 ${isUrdu ? "urdu-text" : ""}`}>
-                {t("settings_restoreImportHint")}
-              </p>
-            </div>
-
-            {!can("DATABASE_RESTORE") ? (
-              <p className={`text-sm text-gray-400 bg-gray-50 rounded-xl p-4 ${isUrdu ? "urdu-text" : ""}`}>
-                {t("settings_restoreNoPermission")}
-              </p>
-            ) : (
-              <>
-                <div className={`bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 flex gap-3 ${isUrdu ? "urdu-text" : ""}`}>
-                  <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="block">{t("settings_restoreWarningTitle")}</strong>
-                    <span className="leading-relaxed">{t("settings_restoreWarningBody")}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className={`text-xs text-gray-500 ${isUrdu ? "urdu-text" : ""}`}>
-                      {t("settings_backupFileLabel")}
-                    </label>
-                    <input
-                      ref={restoreFileRef}
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={(e) => { setRestoreFile(e.target.files?.[0] ?? null); setRestoreReport(null); }}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm"
-                    />
-                    {restoreFile && (
-                      <p className="text-xs text-gray-400 mt-1 font-mono">
-                        {restoreFile.name} · {(restoreFile.size / 1024).toFixed(0)} KB
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className={`text-xs text-gray-500 ${isUrdu ? "urdu-text" : ""}`}>
-                      {t("settings_typeToConfirmLabel").replace("{phrase}", RESTORE_PHRASE)}
-                    </label>
-                    <input
-                      value={restoreConfirm}
-                      onChange={(e) => setRestoreConfirm(e.target.value)}
-                      placeholder={RESTORE_PHRASE}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 font-mono tracking-widest max-w-xs"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleRestore}
-                    disabled={restoring || !restoreFile || restoreConfirm.trim().toUpperCase() !== RESTORE_PHRASE}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {restoring ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                    <span className={isUrdu ? "urdu-text" : ""}>
-                      {restoring ? t("settings_restoring") : t("settings_restoreNow")}
-                    </span>
-                  </button>
-                </div>
-
-                {restoreReport && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-900 space-y-2">
-                    <div className={`font-semibold flex items-center gap-2 ${isUrdu ? "urdu-text" : ""}`}>
-                      <Check className="w-4 h-4" />
-                      {t("settings_restoreDoneMsg")
-                        .replace("{tables}", String(restoreReport.tablesRestored))
-                        .replace("{rows}", restoreReport.rowsRestored.toLocaleString())}
-                    </div>
-                    {restoreReport.warnings.length > 0 && (
-                      <ul className="list-disc ps-5 space-y-1 text-amber-800">
-                        {restoreReport.warnings.map((warning, i) => <li key={i}>{warning}</li>)}
-                      </ul>
-                    )}
-                    <p className={`text-xs text-green-700 ${isUrdu ? "urdu-text" : ""}`}>
-                      {t("settings_restoreReloadHint")}
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          {/* Restore — from a file, the local backup folder or Google Drive */}
+          <BackupRestore
+            onRestored={async () => {
+              // Every table was replaced, including this branch's own settings row
+              // and the permission matrix, so the cached copies in this tab are stale.
+              await refresh();
+              loadBackupSummary();
+            }}
+          />
         </div>
       )}
 

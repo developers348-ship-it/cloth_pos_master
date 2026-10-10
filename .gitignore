@@ -63,3 +63,14 @@ next-env.d.ts
 
 # ─── Clear Data tool backups (whole-DB JSON dumps — never committed) ─────────
 /data/test-data-backups/
+
+# Output of the scheduled backup task (scripts/run-backup.cmd)
+/backup.log
+
+# Google OAuth client downloads contain the client secret — never commit them
+client_secret_*.json
+
+# POS launcher logs (start-pos.bat / start-ngrok.bat)
+/pos-server.log
+/ngrok.log
+/ngrok-policy.yml

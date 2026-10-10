@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { formatDate, formatTime } from "@/lib/utils";
+import { formatDateLong, formatTime12 } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { useStore } from "@/lib/store-context";
 import { receiptFontScale, RECEIPT_FONT_SIZE_DEFAULT, type ReceiptFontScale } from "@/lib/receipt-font";
@@ -23,6 +23,13 @@ import { invoiceDiscounts, lineDiscount, type InvoiceDetail } from "./invoice-de
  * On a net-return invoice `cashReceived`/`bankAmount` are money paid *out*, so
  * the labels flip to "Refunded" — the same reading the Sales page uses.
  */
+
+/**
+ * Set inline on the slip itself rather than inherited: the report prints from an
+ * iframe that has none of the app's font variables, so an inherited or
+ * `font-mono` family resolves to a different face there than on the Sales page.
+ */
+const RECEIPT_FONT_FAMILY = '"Courier New", Courier, monospace';
 
 /** Plain rupee figure — no thousands grouping games on a 80mm slip. */
 const rs = (n: number) => `Rs. ${Math.abs(n).toFixed(2)}`;
@@ -71,8 +78,8 @@ export default function InvoiceReceipt({
     <div
       ref={docRef}
       id="invoice-receipt"
-      className="mx-auto bg-white font-mono leading-tight text-black"
-      style={{ width: "80mm", padding: "2mm", fontSize: font.base }}
+      className="mx-auto bg-white leading-tight text-black"
+      style={{ width: "80mm", padding: "2mm", fontSize: font.base, fontFamily: RECEIPT_FONT_FAMILY }}
     >
       {/* Store header */}
       <div className="border-b border-dashed border-black pb-1.5 text-center">
@@ -101,7 +108,7 @@ export default function InvoiceReceipt({
 
       <div className="mt-1 flex justify-between gap-2" style={{ fontSize: font.xs }}>
         <span>{t("reports_invoice")} #{detail.invoiceNo}</span>
-        <span>{formatDate(new Date(detail.date))} {formatTime(new Date(detail.date))}</span>
+        <span>{formatDateLong(detail.date)}, {formatTime12(detail.date)}</span>
       </div>
       <div className={u} style={{ fontSize: font.xs }}>
         {t("reports_customer")}: {detail.party.name}{detail.party.accountId ? ` (#${detail.party.accountId})` : ""}
@@ -240,7 +247,7 @@ export default function InvoiceReceipt({
           </div>
           {detail.plan.installments.map((inst) => (
             <div key={inst.seq} className="flex justify-between gap-2">
-              <span>{inst.seq}. {formatDate(new Date(inst.dueDate))}</span>
+              <span>{inst.seq}. {formatDateLong(inst.dueDate)}</span>
               <span className="tabular-nums">{rs(inst.amount)}</span>
             </div>
           ))}
@@ -258,8 +265,10 @@ export default function InvoiceReceipt({
           {store.footerTerms}
         </div>
       )}
-      <div className="mt-1.5 text-center" style={{ fontSize: font.xs }}>
-        {formatDate(new Date())} {formatTime(new Date())}
+      {/* Developer credit */}
+      <div className="mt-2 border-t border-black pt-1.5 text-center" style={{ fontSize: font.xs }}>
+        <div className="font-bold" style={{ fontSize: font.sm }}>Software Developed and managed by A7 Logics</div>
+        <div>www.a7logics.com | 03314570788</div>
       </div>
     </div>
   );

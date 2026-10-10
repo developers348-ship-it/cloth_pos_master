@@ -1,11 +1,8 @@
 /*
   ts-node config for the scripts in this folder.
 
-  It exists to keep `{"module":"CommonJS"}` off the command line. Passed as
-  `--compiler-options {...}` (the way `db:seed` does it) the braces and quotes
-  survive cmd but are mangled by PowerShell, which parses them as a script
-  block and hands ts-node `{module:CommonJS}` — invalid JSON, and the script
-  dies before it runs. A `--project` file is shell-agnostic.
+  It keeps `{"module":"CommonJS"}` in a project file instead of passing it as
+  inline JSON, which PowerShell can mangle before ts-node receives it.
 
   `baseUrl` and `paths` are inherited from the root config, which is where
   `tsconfig-paths/register` reads them from — reset-data.ts imports the app's

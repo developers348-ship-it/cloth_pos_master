@@ -193,7 +193,9 @@ up static optimisation for it.
 
 ## Backup tab
 
-Export is `GET /api/settings/backup?format=sql|json|csv` (`DATABASE_BACKUP`); `?summary=1` returns table and row counts for the header. Restore is `POST /api/settings/backup/restore` (`DATABASE_RESTORE`, SUPER_ADMIN only by default) — multipart with `file` and `confirm=RESTORE`.
+> Scheduled backups, Google Drive upload, the local backup folder and the restore-from-list flow are in **[backup.md](backup.md)**. This section describes the engine underneath.
+
+Export is `GET /api/settings/backup?format=sql|json|csv` (`DATABASE_BACKUP`); `?summary=1` returns table and row counts for the header. Restore is `POST /api/settings/backup/restore` (`DATABASE_RESTORE`, SUPER_ADMIN only by default) — multipart with `confirm=RESTORE` and a backup from `file`, `name` (local folder) or `id` (Drive); `mode=inspect` previews without restoring.
 
 The engine is **`lib/backup.ts`**, plus **`lib/zip.ts`** (a ~90-line stored-only ZIP writer, no new dependency). It introspects the live PostgreSQL catalog rather than walking a hand-written model list, so every table Prisma has migrated is covered automatically:
 

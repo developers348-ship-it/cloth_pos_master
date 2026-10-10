@@ -88,6 +88,7 @@ Before exploring the codebase from scratch, check these first — they map the a
 - [docs/dashboard.md](docs/dashboard.md) — Dashboard page: the Sales & Profit panel (date filter, totals API, hand-rolled SVG chart) and the profit-estimate caveat.
 - [docs/sales-checkout.md](docs/sales-checkout.md) — Sales/checkout page: Party Option selector, payment fields, totals math, returns, customer balance/ledger.
 - [docs/settings-accounts.md](docs/settings-accounts.md) — Settings page tabs and the site-wide feature-toggle pattern.
+- [docs/backup.md](docs/backup.md) — Automatic backups: Windows Task Scheduler job, local folder + Google Drive upload, retention, the safe restore flow, and what `Setting` keys a restore preserves.
 - [docs/accounts.md](docs/accounts.md) — Bank & Cash Accounts page: the Account/AccountEntry model, add/edit/delete rules, the per-account statement endpoint and its filters, and the six account permissions.
 - [docs/expenses.md](docs/expenses.md) — Cost Management page: expenses/salaries, unpaid costs, owner profit withdrawals, the account postings behind them and the Dashboard's net-profit figures.
 - [docs/ledger.md](docs/ledger.md) — Ledger page: Recovery/Payment collecting against specific invoices/GRNs (FIFO allocation + the over-collection cap), the Decimal-as-string totals bug, the Installments side filter, the party repayment strip.

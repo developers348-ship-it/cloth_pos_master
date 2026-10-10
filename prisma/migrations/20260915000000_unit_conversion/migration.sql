@@ -14,7 +14,7 @@
 -- BUNDLE is a purchase-side counting unit. "Item"."unit" is never set to it.
 ALTER TYPE "Unit" ADD VALUE IF NOT EXISTS 'BUNDLE';
 
--- ── Item ─────────────────────────────────────────────────────────────────────
+-- Item
 -- purchaseUnit is informational: it pre-selects the GRN's buy-unit dropdown and
 -- drives the "GAZ: 24" line under a stock figure. Nothing calculates from it.
 ALTER TABLE "Item" ADD COLUMN IF NOT EXISTS "purchaseUnit" "Unit";
@@ -22,14 +22,14 @@ ALTER TABLE "Item" ADD COLUMN IF NOT EXISTS "piecesPerBundle" INTEGER;
 
 UPDATE "Item" SET "purchaseUnit" = "unit" WHERE "purchaseUnit" IS NULL;
 
--- ── ItemStock ────────────────────────────────────────────────────────────────
+-- ItemStock
 -- 12,3 -> 14,4. One metre of a gaz-stocked item is 1.1111 gaz; at three
 -- decimals nine metres leave a phantom 0.001 on hand and the sales screen
 -- offers a metre of cloth that is not on the shelf. Widening a Postgres numeric
 -- never loses data, so this needs no backfill.
 ALTER TABLE "ItemStock" ALTER COLUMN "qty" TYPE DECIMAL(14,4);
 
--- ── GRNItem ──────────────────────────────────────────────────────────────────
+-- GRNItem
 -- "qty"/"costRate" stay as the vendor billed them, in "buyUnit" — the GRN's
 -- money has to match the bill in the vendor's own terms. "stockQty" is that
 -- quantity converted into the item's sell unit, which is what actually moved
@@ -45,7 +45,7 @@ FROM "Item" i
 WHERE i."id" = gi."itemId"
   AND gi."buyUnit" IS NULL;
 
--- ── Settings ─────────────────────────────────────────────────────────────────
+-- Settings
 -- Inches per gaz and per metre, from which the 0.9 / 1.111 factors are derived.
 -- Deliberately not the two factors themselves: those could be edited into
 -- disagreeing with each other, and then a quantity converted out and back would
